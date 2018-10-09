@@ -81,6 +81,7 @@ class InstagramScraper(object):
     def __init__(self, **kwargs):
         default_attr = dict(username='', usernames=[], filename=None,
                             login_user=None, login_pass=None,
+                            query_followings=False, followings_output='profiles.txt',
                             destination='./', retain_username=False, interactive=False,
                             quiet=False, maximum=0, media_metadata=False, latest=False,
                             latest_stamps=False,
@@ -333,6 +334,36 @@ class InstagramScraper(object):
             latest_file = max(list_of_files, key=os.path.getmtime)
             return int(os.path.getmtime(latest_file))
         return 0
+
+    def query_followings_gen(self, username, end_cursor=''):
+        """Generator for followings."""
+        user = self.deep_get(self.get_shared_data(username), 'entry_data.ProfilePage[0].graphql.user')
+        id = user['id']
+        followings, end_cursor = self.__query_followings(id, end_cursor)
+
+
+        if followings:
+            while True:
+                for following in followings:
+                    yield following
+                if end_cursor:
+                    followings, end_cursor = self.__query_followings(id, end_cursor)
+                else:
+                    return
+
+    def __query_followings(self, id, end_cursor=''):
+        params = QUERY_FOLLOWINGS_VARS.format(id, end_cursor)
+        resp = self.get_json(QUERY_FOLLOWINGS.format(params))
+
+        if resp is not None:
+            payload = json.loads(resp)['data']['user']['edge_follow']
+            if payload:
+                end_cursor = payload['page_info']['end_cursor']
+                followings = []
+                for node in payload['edges']:
+                    followings.append(node['node']['username'])
+                return followings, end_cursor
+        return None, None
 
     def query_comments_gen(self, shortcode, end_cursor=''):
         """Generator for comments."""
@@ -1152,6 +1183,10 @@ def main():
     parser.add_argument('--destination', '-d', default='./', help='Download destination')
     parser.add_argument('--login-user', '--login_user', '-u', default=None, help='Instagram login user', required=True)
     parser.add_argument('--login-pass', '--login_pass', '-p', default=None, help='Instagram login password', required=True)
+    parser.add_argument('--query-followings', '--query_followings', action='store_true', default=False,
+                        help='Compile list of profiles followed by login-user to use as input')
+    parser.add_argument('--followings-output', '--followings_output', default='profiles.txt',
+                        help='Output query-followings to file in destination')
     parser.add_argument('--filename', '-f', help='Path to a file containing a list of users to scrape')
     parser.add_argument('--quiet', '-q', default=False, action='store_true', help='Be quiet while scraping')
     parser.add_argument('--maximum', '-m', type=int, default=0, help='Maximum number of items to scrape')
@@ -1214,6 +1249,17 @@ def main():
     scraper = InstagramScraper(**vars(args))
 
     scraper.login()
+
+    if args.query_followings:
+        scraper.usernames = list(scraper.query_followings_gen(scraper.login_user))
+        if args.followings_output:
+            with open(scraper.destination+scraper.followings_output, 'w') as file:
+                for username in scraper.usernames:
+                    file.write(username + "\n")
+            # If not requesting anything else, exit
+            if args.media_types == ['none'] and args.media_metadata is False:
+                scraper.logout()
+                return
 
     if args.tag:
         scraper.scrape_hashtag()
