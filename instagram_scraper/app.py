@@ -81,7 +81,7 @@ class InstagramScraper(object):
     def __init__(self, **kwargs):
         default_attr = dict(username='', usernames=[], filename=None,
                             login_user=None, login_pass=None,
-                            query_followings=False, followings_output='profiles.txt',
+                            followings_input=False, followings_output='profiles.txt',
                             destination='./', retain_username=False, interactive=False,
                             quiet=False, maximum=0, media_metadata=False, latest=False,
                             latest_stamps=False,
@@ -1183,10 +1183,10 @@ def main():
     parser.add_argument('--destination', '-d', default='./', help='Download destination')
     parser.add_argument('--login-user', '--login_user', '-u', default=None, help='Instagram login user', required=True)
     parser.add_argument('--login-pass', '--login_pass', '-p', default=None, help='Instagram login password', required=True)
-    parser.add_argument('--query-followings', '--query_followings', action='store_true', default=False,
+    parser.add_argument('--followings-input', '--followings_input', action='store_true', default=False,
                         help='Compile list of profiles followed by login-user to use as input')
     parser.add_argument('--followings-output', '--followings_output', default='profiles.txt',
-                        help='Output query-followings to file in destination')
+                        help='Output followings-input to file in destination')
     parser.add_argument('--filename', '-f', help='Path to a file containing a list of users to scrape')
     parser.add_argument('--quiet', '-q', default=False, action='store_true', help='Be quiet while scraping')
     parser.add_argument('--maximum', '-m', type=int, default=0, help='Maximum number of items to scrape')
@@ -1219,12 +1219,12 @@ def main():
         parser.print_help()
         raise ValueError('Must provide login user AND password')
 
-    if not args.username and args.filename is None:
+    if not args.username and args.filename is None and not args.followings_input:
         parser.print_help()
-        raise ValueError('Must provide username(s) OR a file containing a list of username(s)')
-    elif args.username and args.filename:
+        raise ValueError('Must provide username(s) OR a file containing a list of username(s) OR pass --followings-input')
+    elif (args.username and args.filename) or (args.username and args.followings_input) or (args.filename and args.followings_input):
         parser.print_help()
-        raise ValueError('Must provide only one of the following: username(s) OR a filename containing username(s)')
+        raise ValueError('Must provide only one of the following: username(s) OR a filename containing username(s) OR --followings-input')
 
     if args.tag and args.location:
         parser.print_help()
@@ -1250,7 +1250,7 @@ def main():
 
     scraper.login()
 
-    if args.query_followings:
+    if args.followings_input:
         scraper.usernames = list(scraper.query_followings_gen(scraper.login_user))
         if args.followings_output:
             with open(scraper.destination+scraper.followings_output, 'w') as file:
