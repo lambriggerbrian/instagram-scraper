@@ -470,7 +470,10 @@ class InstagramScraper(object):
                     self.set_last_scraped_timestamp(value, greatest_timestamp)
 
                 if (self.media_metadata or self.comments or self.include_location) and self.posts:
-                    self.save_json(self.posts, '{0}/{1}.json'.format(dst, value))
+                    if self.latest:
+                        self.merge_json(self.posts, '{0}/{1}.json'.format(dst, value))
+                    else:
+                        self.save_json(self.posts, '{0}/{1}.json'.format(dst, value))
         finally:
             self.quit = True
 
@@ -628,7 +631,10 @@ class InstagramScraper(object):
                         self.set_last_scraped_timestamp(username, greatest_timestamp)
 
                     if (self.media_metadata or self.comments or self.include_location) and self.posts:
-                        self.save_json(self.posts, '{0}/{1}.json'.format(dst, username))
+                        if self.latest:
+                            self.merge_json(self.posts, '{0}/{1}.json'.format(dst, username))
+                        else:
+                            self.save_json(self.posts, '{0}/{1}.json'.format(dst, username))
                 except ValueError:
                     self.logger.error("Unable to scrape user - %s" % username)
         finally:
@@ -1061,6 +1067,16 @@ class InstagramScraper(object):
                 place['location']['lat'],
                 place['location']['lng']
             ))
+
+    def merge_json(self, data, dst='./'):
+        if not os.path.exists(dst):
+            self.save_json(data, dst)
+
+        if data:
+            merged = data
+            with open(dst, 'r') as f:
+                merged += json.load(f)
+            self.save_json(merged, dst)
 
     @staticmethod
     def save_json(data, dst='./'):
