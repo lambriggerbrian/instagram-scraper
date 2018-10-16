@@ -1201,8 +1201,7 @@ def main():
     parser.add_argument('--login-pass', '--login_pass', '-p', default=None, help='Instagram login password', required=True)
     parser.add_argument('--followings-input', '--followings_input', action='store_true', default=False,
                         help='Compile list of profiles followed by login-user to use as input')
-    parser.add_argument('--followings-output', '--followings_output', default='profiles.txt',
-                        help='Output followings-input to file in destination')
+    parser.add_argument('--followings-output', '--followings_output', help='Output followings-input to file in destination')
     parser.add_argument('--filename', '-f', help='Path to a file containing a list of users to scrape')
     parser.add_argument('--quiet', '-q', default=False, action='store_true', help='Be quiet while scraping')
     parser.add_argument('--maximum', '-m', type=int, default=0, help='Maximum number of items to scrape')
