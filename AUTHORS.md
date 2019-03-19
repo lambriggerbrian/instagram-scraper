@@ -18,3 +18,4 @@ instagram-scraper is written and maintained by Richard Arcega, along with the fo
 - John Pimental ([@Emalton](https://github.com/Emalton))
 - kcayut ([@kcayut](https://github.com/kcayut))
 - Brian Lambrigger ([@lambriggerbrian](https://github.com/lambriggerbrian))
+- Hamish Drummond-Hay ([@hamishdh](https://github.com/hamishdh))

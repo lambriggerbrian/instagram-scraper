@@ -38,6 +38,10 @@ $ instagram-scraper <username> -u <your username> -p <your password>
 *By default, downloaded media will be placed in `<current working directory>/<username>`.*
 
 
+Providing username and password is optional, if not supplied the scraper runs as a guest. 
+*Note: In this case all private user's media will be unavailable. All user's stories and high resolution profile pictures will also be unavailable.*
+
+
 To scrape a hashtag for media:
 ```bash
 $ instagram-scraper <hashtag without #> --tag          
@@ -141,7 +145,7 @@ OPTIONS
                     {mediatype}: The type of media being downloaded.
                     {datetime}: Date and time of upload. (Format: 20180101 01h01m01s)
                     {date}: Date of upload. (Format: 20180101)
-                    {year}: Year of uplaod. (Format: 2018)
+                    {year}: Year of upload. (Format: 2018)
                     {month}: Month of upload. (Format: 01-12)
                     {day}: Day of upload. (Format: 01-31)
                     {h}: Hour of upload. (Format: 00-23h)

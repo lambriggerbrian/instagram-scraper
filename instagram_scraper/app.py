@@ -84,7 +84,7 @@ class InstagramScraper(object):
                             login_user=None, login_pass=None,
                             followings_input=False, followings_output='profiles.txt',
                             destination='./', retain_username=False, interactive=False,
-                            quiet=False, maximum=0, media_metadata=False, latest=False,
+                            quiet=False, maximum=0, media_metadata=False, profile_metadata=False, latest=False,
                             latest_stamps=False, cookiejar=None,
                             media_types=['image', 'video', 'story-image', 'story-video'],
                             tag=False, location=False, search_location=False, comments=False,
@@ -128,6 +128,7 @@ class InstagramScraper(object):
         self.rhx_gis = None
 
         self.cookies = None
+        self.authenticated = False
         self.logged_in = False
         self.last_scraped_filemtime = 0
         if default_attr['filter']:
@@ -211,7 +212,18 @@ class InstagramScraper(object):
         if resp is not None:
             return resp.text
 
-    def login(self):
+    def authenticate_as_guest(self):
+        """Authenticate as a guest/non-signed in user"""
+        self.session.headers.update({'Referer': BASE_URL, 'user-agent': STORIES_UA})
+        req = self.session.get(BASE_URL)
+
+        self.session.headers.update({'X-CSRFToken': req.cookies['csrftoken']})
+
+        self.session.headers = {'user-agent': CHROME_WIN_UA}
+        self.rhx_gis = self.get_shared_data()['rhx_gis']
+        self.authenticated = True
+
+    def authenticate_with_login(self):
         """Logs in to instagram."""
         self.session.headers.update({'Referer': BASE_URL, 'user-agent': STORIES_UA})
         req = self.session.get(BASE_URL)
@@ -225,6 +237,7 @@ class InstagramScraper(object):
         login_text = json.loads(login.text)
 
         if login_text.get('authenticated') and login.status_code == 200:
+            self.authenticated = True
             self.logged_in = True
             self.session.headers = {'user-agent': CHROME_WIN_UA}
             self.rhx_gis = self.get_shared_data()['rhx_gis']
@@ -263,6 +276,7 @@ class InstagramScraper(object):
         code_text = json.loads(code.text)
 
         if code_text.get('status') == 'ok':
+            self.authenticated = True
             self.logged_in = True
         elif 'errors' in code.text:
             for count, error in enumerate(code_text['challenge']['errors']):
@@ -277,6 +291,7 @@ class InstagramScraper(object):
             try:
                 logout_data = {'csrfmiddlewaretoken': self.cookies['csrftoken']}
                 self.session.post(LOGOUT_URL, data=logout_data)
+                self.authenticated = False
                 self.logged_in = False
             except requests.exceptions.RequestException:
                 self.logger.warning('Failed to log out ' + self.login_user)
@@ -475,9 +490,9 @@ class InstagramScraper(object):
 
                 if (self.media_metadata or self.comments or self.include_location) and self.posts:
                     if self.latest:
-                        self.merge_json(self.posts, '{0}/{1}.json'.format(dst, value))
+                        self.merge_json({ 'GraphImages': self.posts }, '{0}/{1}.json'.format(dst, value))
                     else:
-                        self.save_json(self.posts, '{0}/{1}.json'.format(dst, value))
+                        self.save_json({ 'GraphImages': self.posts }, '{0}/{1}.json'.format(dst, value))
         finally:
             self.quit = True
 
@@ -607,9 +622,12 @@ class InstagramScraper(object):
                         self.logger.error('User {0} is private'.format(username))
 
                 self.rhx_gis = shared_data['rhx_gis']
-
+            
+                self.get_profile_info(dst, username)
                 self.get_profile_pic(dst, executor, future_to_item, user, username)
-                self.get_stories(dst, executor, future_to_item, user, username)
+
+                if self.logged_in:
+                    self.get_stories(dst, executor, future_to_item, user, username)
 
                 # Crawls the media and sends it to the executor.
                 try:
@@ -636,9 +654,9 @@ class InstagramScraper(object):
 
                     if (self.media_metadata or self.comments or self.include_location) and self.posts:
                         if self.latest:
-                            self.merge_json(self.posts, '{0}/{1}.json'.format(dst, username))
+                            self.merge_json({ 'GraphImages': self.posts }, '{0}/{1}.json'.format(dst, username))
                         else:
-                            self.save_json(self.posts, '{0}/{1}.json'.format(dst, username))
+                            self.save_json({ 'GraphImages': self.posts }, '{0}/{1}.json'.format(dst, username))
                 except ValueError:
                     self.logger.error("Unable to scrape user - %s" % username)
         finally:
@@ -649,28 +667,33 @@ class InstagramScraper(object):
         if 'image' not in self.media_types:
             return
 
-        url = USER_INFO.format(user['id'])
-        resp = self.get_json(url)
+        if self.logged_in:
+            # Try Get the High-Resolution profile picture
+            url = USER_INFO.format(user['id'])
+            resp = self.get_json(url)
 
-        if resp is None:
-            self.logger.error('Error getting user info for {0}'.format(username))
-            return
+            if resp is None:
+                self.logger.error('Error getting user info for {0}'.format(username))
+                return
 
-        user_info = json.loads(resp)['user']
+            user_info = json.loads(resp)['user']
 
-        if user_info['has_anonymous_profile_picture']:
-            return
+            if user_info['has_anonymous_profile_picture']:
+                return
 
-        try:
-            profile_pic_urls = [
-                user_info['hd_profile_pic_url_info']['url'],
-                user_info['hd_profile_pic_versions'][-1]['url'],
-            ]
+            try:
+                profile_pic_urls = [
+                    user_info['hd_profile_pic_url_info']['url'],
+                    user_info['hd_profile_pic_versions'][-1]['url'],
+                ]
 
-            profile_pic_url = next(url for url in profile_pic_urls if url is not None)
-        except (KeyError, IndexError, StopIteration):
-            self.logger.warning('Failed to get high resolution profile picture for {0}'.format(username))
-            profile_pic_url = user['profile_pic_url_hd']
+                profile_pic_url = next(url for url in profile_pic_urls if url is not None)
+            except (KeyError, IndexError, StopIteration):
+                self.logger.warning('Failed to get high resolution profile picture for {0}'.format(username))
+                profile_pic_url = user['profile_pic_url_hd'] 
+        else:
+                # If not logged_in take the Low-Resolution profile picture
+                profile_pic_url = user['profile_pic_url_hd'] 
 
         item = {'urls': [profile_pic_url], 'username': username, 'shortcode':'', 'created_time': 1286323200, '__typename': 'GraphProfilePic'}
 
@@ -679,6 +702,46 @@ class InstagramScraper(object):
                                   ncols=0, disable=self.quiet):
                 future = executor.submit(self.worker_wrapper, self.download, item, dst)
                 future_to_item[future] = item
+
+    def get_profile_info(self, dst, username):
+        if self.profile_metadata is False:
+            return
+        url = USER_URL.format(username)
+        resp = self.get_json(url)
+
+        if resp is None:
+            self.logger.error('Error getting user info for {0}'.format(username))
+            return
+
+        self.logger.info( 'Saving metadata general information on {0}.json'.format(username) )
+
+        user_info = json.loads(resp)['graphql']['user']
+
+        try:
+            profile_info = {
+                'biography': user_info['biography'],
+                'followers_count': user_info['edge_followed_by']['count'],
+                'following_count': user_info['edge_follow']['count'],
+                'full_name': user_info['full_name'],
+                'id': user_info['id'],
+                'is_business_account': user_info['is_business_account'],
+                'is_joined_recently': user_info['is_joined_recently'],
+                'is_private': user_info['is_private'],
+                'posts_count': user_info['edge_owner_to_timeline_media']['count'],
+                'profile_pic_url': user_info['profile_pic_url']
+            }
+        except (KeyError, IndexError, StopIteration):
+            self.logger.warning('Failed to build {0} profile info'.format(username))
+            return
+
+        item = {
+            'GraphProfileInfo': {
+                'info': profile_info,
+                'username': username,
+                'created_time': 1286323200
+            }
+        }
+        self.save_json(item, '{0}/{1}.json'.format(dst, username))
 
     def get_stories(self, dst, executor, future_to_item, user, username):
         """Scrapes the user's stories."""
@@ -1089,8 +1152,14 @@ class InstagramScraper(object):
             os.makedirs(os.path.dirname(dst))
             
         if data:
+            output_list = {}
+            if os.path.exists(dst):
+                with open(dst, "rb") as f:
+                    output_list.update(json.load(f))
+
             with open(dst, 'wb') as f:
-                json.dump(data, codecs.getwriter('utf-8')(f), indent=4, sort_keys=True, ensure_ascii=False)
+                output_list.update(data)
+                json.dump(output_list, codecs.getwriter('utf-8')(f), indent=4, sort_keys=True, ensure_ascii=False)
 
     @staticmethod
     def get_logger(level=logging.DEBUG, verbose=0):
@@ -1206,8 +1275,8 @@ def main():
 
     parser.add_argument('username', help='Instagram user(s) to scrape', nargs='*')
     parser.add_argument('--destination', '-d', default='./', help='Download destination')
-    parser.add_argument('--login-user', '--login_user', '-u', default=None, help='Instagram login user', required=True)
-    parser.add_argument('--login-pass', '--login_pass', '-p', default=None, help='Instagram login password', required=True)
+    parser.add_argument('--login-user', '--login_user', '-u', default=None, help='Instagram login user')
+    parser.add_argument('--login-pass', '--login_pass', '-p', default=None, help='Instagram login password')
     parser.add_argument('--followings-input', '--followings_input', action='store_true', default=False,
                         help='Compile list of profiles followed by login-user to use as input')
     parser.add_argument('--followings-output', '--followings_output', help='Output followings-input to file in destination')
@@ -1218,6 +1287,8 @@ def main():
                         help='Creates username subdirectory when destination flag is set')
     parser.add_argument('--media-metadata', '--media_metadata', action='store_true', default=False,
                         help='Save media metadata to json file')
+    parser.add_argument('--profile-metadata', '--profile_metadata', action='store_true', default=False,
+                        help='Save profile metadata to json file')
     parser.add_argument('--include-location', '--include_location', action='store_true', default=False,
                         help='Include location data when saving media metadata')
     parser.add_argument('--media-types', '--media_types', '-t', nargs='+', default=['image', 'video', 'story'],
@@ -1274,7 +1345,10 @@ def main():
 
     scraper = InstagramScraper(**vars(args))
 
-    scraper.login()
+    if args.login_user and args.login_pass:
+        scraper.authenticate_with_login()
+    else:
+        scraper.authenticate_as_guest()
 
     if args.followings_input:
         scraper.usernames = list(scraper.query_followings_gen(scraper.login_user))
