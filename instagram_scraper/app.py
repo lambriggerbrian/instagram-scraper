@@ -88,7 +88,7 @@ class InstagramScraper(object):
                             latest_stamps=False, cookiejar=None,
                             media_types=['image', 'video', 'story-image', 'story-video'],
                             tag=False, location=False, search_location=False, comments=False,
-                            verbose=0, include_location=False, filter=None,
+                            verbose=0, include_location=False, filter=None, proxies={}, no_check_certificate=False,
                                                         template='{urlname}')
 
         allowed_attr = list(default_attr.keys())
@@ -119,7 +119,18 @@ class InstagramScraper(object):
         self.logger = InstagramScraper.get_logger(level=logging.DEBUG, verbose=default_attr.get('verbose'))
 
         self.posts = []
+
         self.session = requests.Session()
+        if self.no_check_certificate:
+            self.session.verify = False
+
+        try:
+            if self.proxies and type(self.proxies) == str:
+                self.session.proxies = json.loads(self.proxies)
+        except ValueError:
+            self.logger.error("Check is valid json type.")
+            raise
+
         self.session.headers = {'user-agent': CHROME_WIN_UA}
         if self.cookiejar and os.path.exists(self.cookiejar):
             with open(self.cookiejar, 'rb') as f:
@@ -619,14 +630,14 @@ class InstagramScraper(object):
                     continue
                 elif user and user['is_private'] and user['edge_owner_to_timeline_media']['count'] > 0 and not \
                     user['edge_owner_to_timeline_media']['edges']:
-                        self.logger.error('User {0} is private'.format(username))
+                        self.logger.info('User {0} is private'.format(username))
 
                 self.rhx_gis = shared_data['rhx_gis']
             
-                self.get_profile_info(dst, username)
                 self.get_profile_pic(dst, executor, future_to_item, user, username)
 
                 if self.logged_in:
+                    self.get_profile_info(dst, username)
                     self.get_stories(dst, executor, future_to_item, user, username)
 
                 # Crawls the media and sends it to the executor.
@@ -1142,7 +1153,10 @@ class InstagramScraper(object):
         if data:
             merged = data
             with open(dst, 'r') as f:
-                merged += json.load(f)
+                file_data = json.load(f)
+                key = merged.keys()[0]
+                if key in file_data:
+                    merged[key] = file_data[key]
             self.save_json(merged, dst)
 
     @staticmethod
@@ -1289,6 +1303,7 @@ def main():
                         help='Save media metadata to json file')
     parser.add_argument('--profile-metadata', '--profile_metadata', action='store_true', default=False,
                         help='Save profile metadata to json file')
+    parser.add_argument('--proxies', default={}, help='Maximum number of items to scrape')
     parser.add_argument('--include-location', '--include_location', action='store_true', default=False,
                         help='Include location data when saving media metadata')
     parser.add_argument('--media-types', '--media_types', '-t', nargs='+', default=['image', 'video', 'story'],
@@ -1303,6 +1318,7 @@ def main():
     parser.add_argument('--location', action='store_true', default=False, help='Scrape media using a location-id')
     parser.add_argument('--search-location', action='store_true', default=False, help='Search for locations by name')
     parser.add_argument('--comments', action='store_true', default=False, help='Save post comments to json file')
+    parser.add_argument('--no-check-certificate', action='store_true', default=False, help='Do not use ssl on transaction')
     parser.add_argument('--interactive', '-i', action='store_true', default=False,
                         help='Enable interactive login challenge solving')
     parser.add_argument('--retry-forever', action='store_true', default=False,
