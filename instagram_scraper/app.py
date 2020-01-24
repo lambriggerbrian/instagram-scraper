@@ -32,7 +32,6 @@ import tqdm
 from instagram_scraper.constants import *
 
 
-
 try:
     reload(sys)  # Python 2.7
     sys.setdefaultencoding("UTF8")
@@ -43,8 +42,10 @@ warnings.filterwarnings('ignore')
 
 input_lock = threading.RLock()
 
+
 class LockedStream(object):
     file = None
+
     def __init__(self, file):
         self.file = file
 
@@ -55,8 +56,10 @@ class LockedStream(object):
     def flush(self):
         return getattr(self.file, 'flush', lambda: None)()
 
+
 original_stdout, original_stderr = sys.stdout, sys.stderr
-#sys.stdout, sys.stderr = map(LockedStream, (sys.stdout, sys.stderr))
+sys.stdout, sys.stderr = map(LockedStream, (sys.stdout, sys.stderr))
+
 
 def threaded_input(prompt):
     with input_lock:
@@ -71,10 +74,13 @@ def threaded_input(prompt):
             original_stdout.flush()
             return sys.stdin.readline()
 
+
 input = threaded_input
+
 
 class PartialContentException(Exception):
     pass
+
 
 class InstagramScraper(object):
     """InstagramScraper scrapes and downloads an instagram user's photos and videos"""
@@ -83,13 +89,14 @@ class InstagramScraper(object):
         default_attr = dict(username='', usernames=[], filename=None,
                             login_user=None, login_pass=None,
                             followings_input=False, followings_output='profiles.txt',
+                            search_ids=None, ids_output='ids_to_users.out', user_ids={},
                             destination='./', logger=None, retain_username=False, interactive=False,
                             quiet=False, maximum=0, media_metadata=False, profile_metadata=False, latest=False,
                             latest_stamps=False, cookiejar=None,
                             media_types=['image', 'video', 'story-image', 'story-video'],
                             tag=False, location=False, search_location=False, comments=False,
                             verbose=0, include_location=False, filter=None, proxies={}, no_check_certificate=False,
-                                                        template='{urlname}', log_destination='')
+                            template='{urlname}', log_destination='')
 
         allowed_attr = list(default_attr.keys())
         default_attr.update(kwargs)
@@ -643,7 +650,7 @@ class InstagramScraper(object):
 
                 # Crawls the media and sends it to the executor.
                 try:
-                    #import pdb; pdb.set_trace()
+
                     self.get_media(dst, executor, future_to_item, user)
 
                     # Displays the progress bar of completed downloads. Might not even pop up if all media is downloaded while
@@ -674,6 +681,21 @@ class InstagramScraper(object):
         finally:
             self.quit = True
             self.logout()
+
+    def __get_user_info(self, id):
+        url = USER_INFO.format(id)
+        self.session.headers.update({'user-agent': STORIES_UA})
+        resp = self.get_json(url)
+
+        if resp is None:
+            self.logger.error('Error getting user info for {0}: Response:\n{1}'.format(id,resp))
+            return
+
+        return json.loads(resp)['user']
+
+    def get_username_from_id(self, id):
+        user_info = self.__get_user_info(id)
+        return user_info['username'], user_info['full_name']
 
     def get_profile_pic(self, dst, executor, future_to_item, user, username):
         if 'image' not in self.media_types:
@@ -1109,8 +1131,6 @@ class InstagramScraper(object):
         current_timestamp = self.__get_timestamp(item)
         return current_timestamp > 0 and current_timestamp > self.last_scraped_filemtime
 
-    @staticmethod
-    def __get_timestamp(item):
         if item:
             for key in ['taken_at_timestamp', 'created_time', 'taken_at', 'date']:
                 found = item.get(key, 0)
@@ -1143,12 +1163,12 @@ class InstagramScraper(object):
         for item in sorted_places[0:5]:
             place = item['place']
             print('location-id: {0}, title: {1}, subtitle: {2}, city: {3}, lat: {4}, lng: {5}'.format(
-                place['location']['pk'],
+                place['location'].get('pk'),
                 place['title'],
                 place['subtitle'],
-                place['location']['city'],
-                place['location']['lat'],
-                place['location']['lng']
+                place['location'].get('city'),
+                place['location'].get('lat'),
+                place['location'].get('lng')
             ))
 
     def merge_json(self, data, dst='./'):
@@ -1323,6 +1343,8 @@ def main():
     parser.add_argument('--filter', default=None, help='Filter by tags in user posts', nargs='*')
     parser.add_argument('--location', action='store_true', default=False, help='Scrape media using a location-id')
     parser.add_argument('--search-location', action='store_true', default=False, help='Search for locations by name')
+    parser.add_argument('--search-ids', '--search_ids',  nargs='+', default=None, help='File or list of ids to get usernames for')
+    parser.add_argument('--ids-output', '--ids_output', help='File to output usernames from ids')
     parser.add_argument('--comments', action='store_true', default=False, help='Save post comments to json file')
     parser.add_argument('--no-check-certificate', action='store_true', default=False, help='Do not use ssl on transaction')
     parser.add_argument('--interactive', '-i', action='store_true', default=False,
@@ -1339,9 +1361,9 @@ def main():
         parser.print_help()
         raise ValueError('Must provide login user AND password')
 
-    if not args.username and args.filename is None and not args.followings_input:
+    if not args.username and args.filename is None and not args.followings_input and not args.search_ids:
         parser.print_help()
-        raise ValueError('Must provide username(s) OR a file containing a list of username(s) OR pass --followings-input')
+        raise ValueError('Must provide username(s) OR a file containing a list of username(s) OR pass --followings-input OR user ids to search for')
     elif (args.username and args.filename) or (args.username and args.followings_input) or (args.filename and args.followings_input):
         parser.print_help()
         raise ValueError('Must provide only one of the following: username(s) OR a filename containing username(s) OR --followings-input')
@@ -1374,7 +1396,17 @@ def main():
         scraper.authenticate_with_login()
     else:
         scraper.authenticate_as_guest()
-
+    if args.search_ids:
+        scraper.search_ids = InstagramScraper.parse_delimited_str(','.join(scraper.search_ids))
+        ids_file = open(scraper.ids_output, 'w') if scraper.ids_output else None
+        if ids_file: ids_file.write("id,username,fullname")
+        for id in scraper.search_ids:
+            username, fullname = scraper.get_username_from_id(id)
+            out_string = "{0},{1},{2}".format(id, username, fullname)
+            if ids_file: ids_file.write(out_string+"\n")
+            else: print(out_string)
+        if ids_file: ids_file.close()
+        exit(0)
     if args.followings_input:
         scraper.usernames = list(scraper.query_followings_gen(scraper.login_user))
         if args.followings_output:
